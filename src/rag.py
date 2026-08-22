@@ -2,6 +2,7 @@ from langchain_core.prompts import ChatPromptTemplate
 from langchain_aws import ChatBedrockConverse
 from .config import Settings
 from .schemas import Citation
+from .embed import load_index
 
 _SYS = (
     "Answer the question using ONLY the transcript context provided. "
@@ -25,8 +26,10 @@ def prepare(question: str, job, settings: Settings):
     llm = _llm(settings)
     k = settings.retriever_top_k
     
-    if getattr(job, "vectorstore", None) is not None:
-        docs = job.vectorstore.similarity_search(question, k=k)
+    if getattr(job, "has_index", False):
+        # ponytail: reconnects Chroma from disk per ask; cache by job_id if latency matters
+        vectorstore = load_index(job.job_id, settings)
+        docs = vectorstore.similarity_search(question, k=k)
         context = "\n\n".join(
             f"[{_ts(d.metadata['start'])}-{_ts(d.metadata['end'])}] {d.page_content}" for d in docs
         )

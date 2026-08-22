@@ -16,11 +16,12 @@ from src.summarize import summarize
 async def lifespan(app: FastAPI):
     settings = get_settings()
     os.makedirs(settings.upload_dir, exist_ok=True)
+    os.makedirs(settings.chroma_dir, exist_ok=True)
     transcriber = Transcriber(settings)
-    transcriber.load() 
+    transcriber.load()
     app.state.settings = settings
     app.state.transcriber = transcriber
-    app.state.jobs = JobStore()
+    app.state.jobs = JobStore(settings.db_path)
     yield
     
     
@@ -44,7 +45,8 @@ def _process(job_id: str, path: str, state):
         )
         
         if settings.enable_rag and segments:
-            jobs.update(job_id, vectorstore=build_index(segments, settings), status="done")
+            build_index(segments, settings, collection_name=job_id)
+            jobs.update(job_id, has_index=True, status="done")
     except Exception as ex:
         jobs.update(job_id, status="error", error=str(ex))
     finally:

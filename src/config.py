@@ -18,7 +18,7 @@ class Settings(BaseSettings):
     max_upload_mb: int = 40
     
     ollama_base_url: str = "http://localhost:11434"
-    llm_model: str = "amazon.nova-lite-v1:0"
+    llm_model: str = "us.amazon.nova-micro-v1:0"
     region_name: str = "us-east-1"
     embed_model: str = "nomic-embed-text"
     num_ctx: int = 16384
@@ -30,6 +30,9 @@ class Settings(BaseSettings):
     retriever_top_k: int = 4
     
     upload_dir: str = "./tmp/uploads"
+    
+    chroma_dir: str = "./tmp/chroma"
+    db_path: str = "./tmp/jobs.db"
     
     AWS_ACCESS_KEY_ID: str
     AWS_SECRET_ACCESS_KEY: str
