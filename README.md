@@ -3,24 +3,7 @@
 Upload audio (<= 40 min) -> faster-whisper transcript -> Ollama (Llama 3.1/3.2)
 summarization and RAG-based Q&A. Local-first, no external API keys.
 
-## Prerequisites
-
-    # 1. Ollama running with the two models pulled
-    ollama serve            
-    ollama pull llama3.1
-    ollama pull nomic-embed-text
-
-
-## Run
-
-    cp .env.example .env    
-    uvicorn app.main:app --reload
-
-First request downloads the faster-whisper model once; it is then held in memory.
-
 ## Flow
-
-    ## API Reference
 
 ### POST /transcribe
 
