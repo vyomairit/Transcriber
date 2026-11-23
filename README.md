@@ -1,7 +1,29 @@
 # Audio -> Insight
 
-Upload audio (<= 40 min) -> faster-whisper transcript -> Ollama (Llama 3.1/3.2)
-summarization and RAG-based Q&A. Local-first, no external API keys.
+Upload audio (<= 40 min) -> faster-whisper transcript -> AWS Bedrock (Nova Micro)
+summarization and RAG-based Q&A over Chroma, with Ollama (`nomic-embed-text`) embeddings.
+
+## Running
+
+Backend (needs Bedrock access and a local Ollama with `nomic-embed-text` pulled).
+AWS credentials can go in `.env` (`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, optional
+`AWS_SESSION_TOKEN`, `AWS_DEFAULT_REGION`); if omitted, boto3's default chain is used
+(environment, `~/.aws`, IAM role):
+
+    uv sync
+    uv run uvicorn main:app --reload --port 8000
+
+Web UI (React + Vite + Tailwind, in `frontend/`):
+
+    cd frontend
+    npm install
+    npm run dev        # http://localhost:5173, proxies /api -> http://localhost:8000
+
+The UI covers the full flow: drag-and-drop upload with progress, live job status
+(queued -> transcribing -> indexing -> done), searchable transcript with click-to-seek
+audio playback and .txt/.srt export, summaries in three styles, and a Q&A chat with
+streamed answers or cited sources. Set `BACKEND_URL` to proxy elsewhere, or
+`VITE_API_URL` to call the API directly (add the UI origin to `CORS_ORIGINS`).
 
 ## Flow
 
@@ -56,19 +78,23 @@ Response:
 
 ### POST /ask/{job_id}
 
-Ask a question about transcript content.
+Ask a question about transcript content. For follow-ups, send the earlier turns
+in `history` (oldest first); the server keeps no chat state.
 
 Request:
 
     curl -X POST http://localhost:8000/ask/<job_id> \
       -H "Content-Type: application/json" \
-      -d '{"question":"What did they decide about the deadline?"}'
+      -d '{"question":"Who owns that?",
+           "history":[{"role":"user","content":"What did they decide about the deadline?"},
+                      {"role":"assistant","content":"It moved to March 15 [00:07]."}]}'
 
 Response:
 
     {
       "answer": "...",
-      "citations": [ ... ]
+      "citations": [ ... ],
+      "search_query": "Who owns the March 15 deadline?"
     }
 
 ### POST /ask/{job_id}/stream
@@ -90,6 +116,10 @@ Request:
   background thread; summarize/ask are sync `def` (threadpool).
 - **Chunking follows Whisper segment boundaries** and keeps timestamps as
   metadata, so RAG answers can cite [mm:ss].
+- **Conversation history is client-held.** With `history`, a follow-up is first
+  rewritten into a standalone question (one extra small LLM call) so retrieval
+  matches the right chunks. The last `max_history_turns` messages (default 6) then go
+  into the answer prompt. A first question skips the rewrite.
 - **`num_ctx=16384`** overrides Ollama's ~2k default so long transcripts
   aren't silently truncated.
 
