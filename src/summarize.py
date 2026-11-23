@@ -32,7 +32,7 @@ def summarize(text:str, style:str, instructions: str|None, settings: Settings):
             ("human", "{hint}{extra}\n\nTranscript:\n{text}"),
         ])
         out = (prompt | llm).invoke({"hint": hint, "extra": extra, "text": text})
-        return out.content, "single_shot"
+        return out.text, "single_shot"
     return _map_reduce(text, hint, extra, llm, settings), "map_reduce"
 
 def _map_reduce(text: str, hint: str, extra:str, llm: ChatBedrockConverse, settings: Settings):
@@ -47,11 +47,11 @@ def _map_reduce(text: str, hint: str, extra:str, llm: ChatBedrockConverse, setti
         ("human", "{chunk}"),
     ]) | llm
     
-    partials = [map_chain.invoke({"chunk": c}).content for c  in chunks]
+    partials = [map_chain.invoke({"chunk": c}).text for c in chunks]
     reduce_chain = ChatPromptTemplate.from_messages([
         ("system", "Combine these partial summaries into one coherent result. Never invent facts."),
         ("human", "{hint}{extra}\n\nPartial summaries:\n{joined}"),
     ]) | llm
     
     joined = "\n\n".join(f"- {p}" for p in partials)
-    return reduce_chain.invoke({"hint": hint, "extra": extra, "joined": joined}).content
+    return reduce_chain.invoke({"hint": hint, "extra": extra, "joined": joined}).text

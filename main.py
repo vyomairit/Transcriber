@@ -2,6 +2,8 @@ from contextlib import asynccontextmanager
 import os
 
 from fastapi import BackgroundTasks, FastAPI, File, HTTPException, Request, UploadFile
+from fastapi.concurrency import run_in_threadpool
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 
 from src.config import get_settings
@@ -26,6 +28,12 @@ async def lifespan(app: FastAPI):
     
     
 app = FastAPI(title="Audio Transcript", lifespan=lifespan)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=get_settings().cors_origins,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 @app.get("/")
 async def health():
@@ -58,8 +66,10 @@ def _process(job_id: str, path: str, state):
 @app.post("/transcribe", response_model=JobStatus)
 async def transcribe(request:Request, background: BackgroundTasks, file: UploadFile=File(...)):
     settings, transcriber, jobs = request.app.state.settings, request.app.state.transcriber, request.app.state.jobs
-    job = jobs.create(filename=file.filename)
-    path = os.path.join(settings.upload_dir, f"{job.job_id}_{file.filename}")
+    # basename() stops a crafted filename like "../../x" escaping upload_dir
+    filename = os.path.basename(file.filename or "upload")
+    job = jobs.create(filename=filename)
+    path = os.path.join(settings.upload_dir, f"{job.job_id}_{filename}")
     
     max_bytes  = settings.max_upload_mb * 1024 * 1024
     size=0
@@ -86,7 +96,7 @@ async def transcribe(request:Request, background: BackgroundTasks, file: UploadF
         
     jobs.update(job.job_id, duration_sec=duration, status="queued")
     background.add_task(_process, job.job_id, path, request.app.state)
-    return JobStatus(job_id=job.job_id, status="queued", duration_sec=duration, filename=file.filename)
+    return JobStatus(job_id=job.job_id, status="queued", duration_sec=duration, filename=filename)
 
 
 @app.get("/jobs/{job_id}", response_model=TranscriptResponse)
@@ -129,19 +139,25 @@ def ask_job(job_id:str, req:AskRequest, request:Request):
         settings = settings.model_copy(update={"retriever_top_k":req.k})
     
     chain, inputs, citations, mode = prepare(req.question, job, settings)
-    answer = chain.invoke(inputs).content
+    answer = chain.invoke(inputs).text
     return AskResponse(job_id=job_id, answer=answer, mode=mode, citations=citations)
 
 @app.post("/ask/{job_id}/stream")
 async def ask_job_stream(job_id: str, req: AskRequest, request: Request):
     job = _require_ready(request, job_id)
     settings = request.app.state.settings
-    chain, inputs, _citations, _mode = prepare(req.question, job, settings)
+    if req.k:
+        settings = settings.model_copy(update={"retriever_top_k": req.k})
+    # prepare() embeds the question and hits Chroma synchronously; keep it off the event loop
+    chain, inputs, _citations, _mode = await run_in_threadpool(prepare, req.question, job, settings)
 
     async def token_stream():
         async for part in chain.astream(inputs):
-            if part.content:
-                yield f"data: {part.content}\n\n"
+            # Bedrock Converse streams content as a list of blocks; .text flattens it to str
+            token = part.text
+            if token:
+                # one "data:" line per line of the token, so newlines survive SSE framing
+                yield "".join(f"data: {line}\n" for line in token.split("\n")) + "\n"
         yield "data: [DONE]\n\n"
 
     return StreamingResponse(token_stream(), media_type="text/event-stream")

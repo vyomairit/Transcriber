@@ -1,7 +1,27 @@
 # Audio -> Insight
 
-Upload audio (<= 40 min) -> faster-whisper transcript -> Ollama (Llama 3.1/3.2)
-summarization and RAG-based Q&A. Local-first, no external API keys.
+Upload audio (<= 40 min) -> faster-whisper transcript -> AWS Bedrock (Nova Micro)
+summarization and RAG-based Q&A over Chroma, with Ollama (`nomic-embed-text`) embeddings.
+
+## Running
+
+Backend (needs `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_DEFAULT_REGION` in `.env`,
+and a local Ollama with `nomic-embed-text` pulled):
+
+    uv sync
+    uv run uvicorn main:app --reload --port 8000
+
+Web UI (React + Vite + Tailwind, in `frontend/`):
+
+    cd frontend
+    npm install
+    npm run dev        # http://localhost:5173, proxies /api -> http://localhost:8000
+
+The UI covers the full flow: drag-and-drop upload with progress, live job status
+(queued -> transcribing -> indexing -> done), searchable transcript with click-to-seek
+audio playback and .txt/.srt export, summaries in three styles, and a Q&A chat with
+streamed answers or cited sources. Set `BACKEND_URL` to proxy elsewhere, or
+`VITE_API_URL` to call the API directly (add the UI origin to `CORS_ORIGINS`).
 
 ## Flow
 

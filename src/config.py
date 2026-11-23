@@ -33,6 +33,8 @@ class Settings(BaseSettings):
     
     chroma_dir: str = "./tmp/chroma"
     db_path: str = "./tmp/jobs.db"
+
+    cors_origins: list[str] = ["http://localhost:5173", "http://127.0.0.1:5173"]
     
     AWS_ACCESS_KEY_ID: str
     AWS_SECRET_ACCESS_KEY: str
