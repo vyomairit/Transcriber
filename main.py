@@ -147,9 +147,11 @@ def ask_job(job_id:str, req:AskRequest, request:Request):
     if req.k:
         settings = settings.model_copy(update={"retriever_top_k":req.k})
     
-    chain, inputs, citations, mode = prepare(req.question, job, settings)
+    chain, inputs, citations, mode, search_query = prepare(req.question, job, settings, req.history)
     answer = chain.invoke(inputs).text
-    return AskResponse(job_id=job_id, answer=answer, mode=mode, citations=citations)
+    return AskResponse(
+        job_id=job_id, answer=answer, mode=mode, citations=citations, search_query=search_query,
+    )
 
 @app.post("/ask/{job_id}/stream")
 async def ask_job_stream(job_id: str, req: AskRequest, request: Request):
@@ -157,8 +159,11 @@ async def ask_job_stream(job_id: str, req: AskRequest, request: Request):
     settings = request.app.state.settings
     if req.k:
         settings = settings.model_copy(update={"retriever_top_k": req.k})
-    # prepare() embeds the question and hits Chroma synchronously; keep it off the event loop
-    chain, inputs, _citations, _mode = await run_in_threadpool(prepare, req.question, job, settings)
+    # prepare() may rewrite the question with the LLM, embeds it and hits Chroma, all
+    # synchronously; keep it off the event loop
+    chain, inputs, _citations, _mode, _query = await run_in_threadpool(
+        prepare, req.question, job, settings, req.history,
+    )
 
     async def token_stream():
         async for part in chain.astream(inputs):

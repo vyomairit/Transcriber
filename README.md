@@ -78,19 +78,23 @@ Response:
 
 ### POST /ask/{job_id}
 
-Ask a question about transcript content.
+Ask a question about transcript content. For follow-ups, send the earlier turns
+in `history` (oldest first); the server keeps no chat state.
 
 Request:
 
     curl -X POST http://localhost:8000/ask/<job_id> \
       -H "Content-Type: application/json" \
-      -d '{"question":"What did they decide about the deadline?"}'
+      -d '{"question":"Who owns that?",
+           "history":[{"role":"user","content":"What did they decide about the deadline?"},
+                      {"role":"assistant","content":"It moved to March 15 [00:07]."}]}'
 
 Response:
 
     {
       "answer": "...",
-      "citations": [ ... ]
+      "citations": [ ... ],
+      "search_query": "Who owns the March 15 deadline?"
     }
 
 ### POST /ask/{job_id}/stream
@@ -112,6 +116,10 @@ Request:
   background thread; summarize/ask are sync `def` (threadpool).
 - **Chunking follows Whisper segment boundaries** and keeps timestamps as
   metadata, so RAG answers can cite [mm:ss].
+- **Conversation history is client-held.** With `history`, a follow-up is first
+  rewritten into a standalone question (one extra small LLM call) so retrieval
+  matches the right chunks. The last `max_history_turns` messages (default 6) then go
+  into the answer prompt. A first question skips the rewrite.
 - **`num_ctx=16384`** overrides Ollama's ~2k default so long transcripts
   aren't silently truncated.
 

@@ -3,6 +3,21 @@ import { ask, askStream } from "../api";
 import { ts } from "../utils";
 import Markdownish from "./Markdownish";
 
+// The server keeps no chat state; it trims to its own max_history_turns, this just bounds the payload.
+const MAX_HISTORY = 12;
+
+/** Completed turns as the API expects them: [{role, content}], oldest first. */
+function toHistory(messages) {
+  const turns = [];
+  for (let i = 0; i + 1 < messages.length; i += 2) {
+    const [q, a] = [messages[i], messages[i + 1]];
+    // Skip failed exchanges so the model doesn't build on an error or an empty answer.
+    if (a.error || a.pending || !a.text.trim()) continue;
+    turns.push({ role: "user", content: q.text }, { role: "assistant", content: a.text });
+  }
+  return turns.slice(-MAX_HISTORY);
+}
+
 const SUGGESTIONS = ["What were the main topics discussed?", "What decisions were made?", "Were any deadlines mentioned?"];
 
 export default function AskTab({ job, onSeek }) {
@@ -24,17 +39,24 @@ export default function AskTab({ job, onSeek }) {
   async function send(q) {
     q = q.trim();
     if (!q || busy) return;
+    const history = toHistory(messages);
     setQuestion("");
     setBusy(true);
     setMessages((m) => [...m, { role: "user", text: q }, { role: "assistant", text: "", pending: true }]);
     try {
       if (stream) {
         abort.current = new AbortController();
-        await askStream(job.job_id, q, k, (tok) => patchLast((msg) => ({ ...msg, text: msg.text + tok })), abort.current.signal);
+        await askStream(job.job_id, q, k, history, (tok) => patchLast((msg) => ({ ...msg, text: msg.text + tok })), abort.current.signal);
         patchLast((msg) => ({ ...msg, pending: false }));
       } else {
-        const r = await ask(job.job_id, q, k);
-        patchLast(() => ({ role: "assistant", text: r.answer, citations: r.citations, mode: r.mode }));
+        const r = await ask(job.job_id, q, k, history);
+        patchLast(() => ({
+          role: "assistant",
+          text: r.answer,
+          citations: r.citations,
+          mode: r.mode,
+          searchQuery: r.search_query && r.search_query !== q ? r.search_query : null,
+        }));
       }
     } catch (e) {
       if (e.name === "AbortError") patchLast((msg) => ({ ...msg, pending: false, text: msg.text + " …(stopped)" }));
@@ -64,12 +86,23 @@ export default function AskTab({ job, onSeek }) {
           />
         </label>
         {stream && <span className="text-xs text-slate-400">Turn off streaming to see source citations.</span>}
+        {messages.length > 0 && (
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => setMessages([])}
+            title="Start over; earlier questions won't be used as context"
+            className="ml-auto rounded-lg border border-slate-200 px-3 py-1 text-xs text-slate-600 hover:bg-slate-50 disabled:opacity-50"
+          >
+            New chat
+          </button>
+        )}
       </div>
 
       <div className="min-h-48 max-h-[55vh] space-y-4 overflow-y-auto rounded-xl bg-slate-50 p-4">
         {messages.length === 0 && (
           <div className="py-6 text-center">
-            <p className="text-sm text-slate-500">Ask anything about this recording.</p>
+            <p className="text-sm text-slate-500">Ask anything about this recording. Follow-up questions remember the conversation.</p>
             <div className="mt-3 flex flex-wrap justify-center gap-2">
               {SUGGESTIONS.map((s) => (
                 <button key={s} onClick={() => send(s)} className="rounded-full bg-white px-3 py-1.5 text-xs text-slate-700 ring-1 ring-slate-200 hover:ring-indigo-300">
@@ -115,6 +148,11 @@ export default function AskTab({ job, onSeek }) {
                     ))}
                   </ul>
                 </div>
+              )}
+              {m.searchQuery && (
+                <p className="mt-2 text-xs text-slate-500">
+                  Searched for: <span className="italic">“{m.searchQuery}”</span>
+                </p>
               )}
               {m.mode && (
                 <p className="mt-2 text-[11px] uppercase tracking-wide text-slate-400">

@@ -31,6 +31,9 @@ class Settings(BaseSettings):
     chunk_target_chars: int = 1200
     chunk_overlap_chars: int = 150
     retriever_top_k: int = 4
+
+    max_history_turns: int = 6          # most recent chat messages sent to the LLM
+    max_history_chars_per_turn: int = 2000
     
     upload_dir: str = "./tmp/uploads"
     

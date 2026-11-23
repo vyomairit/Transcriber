@@ -27,9 +27,17 @@ class SummarizeResponse(BaseModel):
     summary: str
     method: Literal["single_shot", "map_reduce"]
     
+class ChatTurn(BaseModel):
+    role: Literal["user", "assistant"]
+    content: str
+
+
 class AskRequest(BaseModel):
     question: str
     k: Optional[int] = None
+    # Prior turns of this conversation, oldest first. The server is stateless:
+    # the client sends the history it wants considered with every question.
+    history: list[ChatTurn] = Field(default_factory=list)
     
     
 class Citation(BaseModel):
@@ -42,4 +50,6 @@ class AskResponse(BaseModel):
     answer: str
     mode: Literal["rag", "stuffed"]
     citations: list[Citation] = Field(default_factory=list)
+    # The query actually used for retrieval (a follow-up rewritten as a standalone question).
+    search_query: Optional[str] = None
     

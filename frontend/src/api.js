@@ -33,8 +33,8 @@ export const health = () => request("/");
 export const getJob = (jobId) => request(`/jobs/${jobId}`);
 export const summarize = (jobId, style, instructions) =>
   request(`/summarize/${jobId}`, json({ style, instructions: instructions || null }));
-export const ask = (jobId, question, k) =>
-  request(`/ask/${jobId}`, json({ question, k: k || null }));
+export const ask = (jobId, question, k, history = []) =>
+  request(`/ask/${jobId}`, json({ question, k: k || null, history }));
 
 /** POST /transcribe with upload progress (fetch has no upload progress, so XHR). */
 export function uploadAudio(file, onProgress) {
@@ -65,10 +65,10 @@ export function uploadAudio(file, onProgress) {
  * POST /ask/{id}/stream and feed tokens to onToken as they arrive.
  * EventSource only supports GET, so the SSE stream is parsed by hand.
  */
-export async function askStream(jobId, question, k, onToken, signal) {
+export async function askStream(jobId, question, k, history, onToken, signal) {
   let res;
   try {
-    res = await fetch(`${API_BASE}/ask/${jobId}/stream`, { ...json({ question, k: k || null }), signal });
+    res = await fetch(`${API_BASE}/ask/${jobId}/stream`, { ...json({ question, k: k || null, history }), signal });
   } catch (e) {
     if (e.name === "AbortError") throw e;
     throw new Error("Cannot reach the backend. Is the FastAPI server running?");
