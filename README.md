@@ -5,8 +5,10 @@ summarization and RAG-based Q&A over Chroma, with Ollama (`nomic-embed-text`) em
 
 ## Running
 
-Backend (needs `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_DEFAULT_REGION` in `.env`,
-and a local Ollama with `nomic-embed-text` pulled):
+Backend (needs Bedrock access and a local Ollama with `nomic-embed-text` pulled).
+AWS credentials can go in `.env` (`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, optional
+`AWS_SESSION_TOKEN`, `AWS_DEFAULT_REGION`); if omitted, boto3's default chain is used
+(environment, `~/.aws`, IAM role):
 
     uv sync
     uv run uvicorn main:app --reload --port 8000

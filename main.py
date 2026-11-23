@@ -1,5 +1,6 @@
 from contextlib import asynccontextmanager
 import os
+import uuid
 
 from fastapi import BackgroundTasks, FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.concurrency import run_in_threadpool
@@ -58,45 +59,53 @@ def _process(job_id: str, path: str, state):
     except Exception as ex:
         jobs.update(job_id, status="error", error=str(ex))
     finally:
-        try:
-            os.remove(path)
-        except OSError:
-            pass
+        _remove(path)
         
 @app.post("/transcribe", response_model=JobStatus)
-async def transcribe(request:Request, background: BackgroundTasks, file: UploadFile=File(...)):
+async def transcribe(request: Request, background: BackgroundTasks, file: UploadFile = File(...)):
     settings, transcriber, jobs = request.app.state.settings, request.app.state.transcriber, request.app.state.jobs
     # basename() stops a crafted filename like "../../x" escaping upload_dir
     filename = os.path.basename(file.filename or "upload")
-    job = jobs.create(filename=filename)
-    path = os.path.join(settings.upload_dir, f"{job.job_id}_{filename}")
-    
-    max_bytes  = settings.max_upload_mb * 1024 * 1024
-    size=0
-    
-    with open(path, "wb") as out:
-        while chunk := await file.read(1024*1024):
-            size += len(chunk)
-            if size > max_bytes:
-                out.close()
-                os.remove(path)
-                raise HTTPException(413, f"File exceeds {settings.max_upload_mb} MB limit")
-            out.write(chunk)
-            
+    # Save and validate under a temp name first; the job is only created once the
+    # audio is accepted, so rejected uploads don't leave orphan "queued" jobs behind.
+    path = os.path.join(settings.upload_dir, f"{uuid.uuid4().hex}_{filename}")
+
     try:
-        duration = transcriber.probe_duration(path)
-    except Exception as ex:
-        os.remove(path)
-        raise HTTPException(400, f"Unreadable audio: {ex}")
-    if duration > settings.max_audio_seconds:
-        os.remove(path)
-        raise HTTPException(
-            413,f"Audio is {duration / 60:.1f} min; limit is {settings.max_audio_seconds / 60:.0f} min",
-        )
-        
+        await _save_upload(file, path, settings.max_upload_mb * 1024 * 1024)
+        try:
+            duration = await run_in_threadpool(transcriber.probe_duration, path)
+        except Exception as ex:
+            raise HTTPException(400, f"Unreadable audio: {ex}")
+        if duration > settings.max_audio_seconds:
+            raise HTTPException(
+                413, f"Audio is {duration / 60:.1f} min; limit is {settings.max_audio_seconds / 60:.0f} min",
+            )
+    except BaseException:
+        _remove(path)
+        raise
+
+    job = jobs.create(filename=filename)
     jobs.update(job.job_id, duration_sec=duration, status="queued")
     background.add_task(_process, job.job_id, path, request.app.state)
     return JobStatus(job_id=job.job_id, status="queued", duration_sec=duration, filename=filename)
+
+
+async def _save_upload(file: UploadFile, path: str, max_bytes: int):
+    size = 0
+    with open(path, "wb") as out:
+        while chunk := await file.read(1024 * 1024):
+            size += len(chunk)
+            if size > max_bytes:
+                raise HTTPException(413, f"File exceeds {max_bytes // (1024 * 1024)} MB limit")
+            # disk writes are blocking; keep them off the event loop
+            await run_in_threadpool(out.write, chunk)
+
+
+def _remove(path: str):
+    try:
+        os.remove(path)
+    except OSError:
+        pass
 
 
 @app.get("/jobs/{job_id}", response_model=TranscriptResponse)

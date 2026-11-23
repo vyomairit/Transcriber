@@ -1,6 +1,6 @@
 from langchain_core.prompts import ChatPromptTemplate
-from langchain_aws import ChatBedrockConverse
 from .config import Settings
+from .llm import bedrock_llm
 from .schemas import Citation
 from .embed import load_index
 
@@ -10,12 +10,6 @@ _SYS = (
     "If the answer is not in the transcript, say so plainly."
 )
  
-def _llm(settings: Settings):
-    return ChatBedrockConverse(
-        model=settings.llm_model,
-        region_name=settings.region_name,
-        temperature=settings.temperature
-    )
     
 def _ts(seconds:float):
     m,s = divmod(int(seconds), 60)
@@ -23,7 +17,7 @@ def _ts(seconds:float):
 
 
 def prepare(question: str, job, settings: Settings):
-    llm = _llm(settings)
+    llm = bedrock_llm(settings)
     k = settings.retriever_top_k
     
     if getattr(job, "has_index", False):
